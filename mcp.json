@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "dan-computer-use-mcp": {
+      "command": "dan-computer-use-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}

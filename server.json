@@ -1,0 +1,27 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.danlab/dan-computer-use-mcp",
+  "title": "Dan Computer Use MCP",
+  "description": "Cross-platform computer control via MCP. Control your computer with AI agents.",
+  "version": "1.0.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "dan-computer-use-mcp",
+      "version": "1.0.0",
+      "transport": { "type": "stdio" }
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/danlab/dan-computer-use-mcp"
+  },
+  "author": "DanLab <danlab@danlab.dev>",
+  "license": "MIT",
+  "keywords": ["mcp", "computer-use", "automation", "ai-agents", "desktop-automation"],
+  "categories": ["automation", "developer-tools", "productivity"],
+  "homepage": "https://github.com/danlab/dan-computer-use-mcp",
+  "bugs": {
+    "url": "https://github.com/danlab/dan-computer-use-mcp/issues"
+  }
+}
