@@ -123,15 +123,27 @@ def get_config() -> dict:
     return _config
 
 
-import pyautogui
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 from PIL import Image
 
-# Disable pyautogui failsafe
-pyautogui.FAILSAFE = False
-pyautogui.PAUSE = 0.05
+# pyautogui import with graceful fallback for headless environments
+pyautogui = None
+try:
+    import pyautogui
+    # Disable pyautogui failsafe
+    pyautogui.FAILSAFE = False
+    pyautogui.PAUSE = 0.05
+except Exception as e:
+    logger.warning(f"pyautogui not available (headless or missing display): {e}")
+
+
+def _require_pyautogui():
+    """Helper to check if pyautogui is available. Returns error dict or None."""
+    if pyautogui is None:
+        return {"error": "pyautogui not available. Run on a system with display (macOS/Windows/Linux with DISPLAY).", "code": "NO_DISPLAY"}
+    return None
 
 # Server instance
 app = Server("dan-computer-use-mcp")
@@ -618,6 +630,9 @@ def _build_element_map(screenshot: Image.Image) -> tuple[list[dict], bool, str]:
 
 
 async def handle_get_state(name: str, args: dict) -> str:
+    err = _require_pyautogui()
+    if err:
+        return json.dumps(err)
     loop = asyncio.get_event_loop()
     screenshot = await loop.run_in_executor(None, pyautogui.screenshot)
     buf = io.BytesIO()
@@ -641,6 +656,9 @@ async def handle_get_state(name: str, args: dict) -> str:
 
 
 async def handle_click(name: str, args: dict) -> str:
+    err = _require_pyautogui()
+    if err:
+        return json.dumps(err)
     x, y = args.get("x"), args.get("y")
     element_text = args.get("element_text")
 
@@ -680,6 +698,9 @@ async def handle_click(name: str, args: dict) -> str:
 
 
 async def handle_move_mouse(name: str, args: dict) -> str:
+    err = _require_pyautogui()
+    if err:
+        return json.dumps(err)
     x, y = args["x"], args["y"]
     duration = args.get("duration", 0.2)
     loop = asyncio.get_event_loop()
@@ -689,6 +710,9 @@ async def handle_move_mouse(name: str, args: dict) -> str:
 
 
 async def handle_drag(name: str, args: dict) -> str:
+    err = _require_pyautogui()
+    if err:
+        return json.dumps(err)
     from_x, from_y = args["from_x"], args["from_y"]
     to_x, to_y = args["to_x"], args["to_y"]
     duration = args.get("duration", 0.5)
@@ -699,6 +723,9 @@ async def handle_drag(name: str, args: dict) -> str:
 
 
 async def handle_scroll(name: str, args: dict) -> str:
+    err = _require_pyautogui()
+    if err:
+        return json.dumps(err)
     x, y, clicks = args["x"], args["y"], args["clicks"]
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, lambda: pyautogui.scroll(int(clicks), x=int(x), y=int(y)))
@@ -707,6 +734,9 @@ async def handle_scroll(name: str, args: dict) -> str:
 
 
 async def handle_type_text(name: str, args: dict) -> str:
+    err = _require_pyautogui()
+    if err:
+        return json.dumps(err)
     text = args["text"]
     interval = args.get("interval", 0.02)
     loop = asyncio.get_event_loop()
@@ -716,6 +746,9 @@ async def handle_type_text(name: str, args: dict) -> str:
 
 
 async def handle_press_key(name: str, args: dict) -> str:
+    err = _require_pyautogui()
+    if err:
+        return json.dumps(err)
     key = args["key"]
     presses = args.get("presses", 1)
     loop = asyncio.get_event_loop()
@@ -725,6 +758,9 @@ async def handle_press_key(name: str, args: dict) -> str:
 
 
 async def handle_hotkey(name: str, args: dict) -> str:
+    err = _require_pyautogui()
+    if err:
+        return json.dumps(err)
     keys = args["keys"]
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, lambda: pyautogui.hotkey(*keys))
