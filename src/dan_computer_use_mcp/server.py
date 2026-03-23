@@ -46,6 +46,93 @@ if _log_file:
 _config = None
 
 
+# ============================================================================
+# SECURITY HELPERS
+# ============================================================================
+
+ALLOWED_READ_PATHS = [
+    os.path.expanduser("~/"),
+    "/tmp",
+    "/var/tmp",
+]
+
+ALLOWED_WRITE_PATHS = [
+    os.path.expanduser("~/"),
+    "/tmp",
+    "/var/tmp",
+]
+
+BLOCKED_COMMANDS = [
+    "rm -rf /", "mkfs", "dd if=/dev", ":(){:|:&};:", "chmod 777 /",
+    "wget", "curl -O", "chmod 777", "chown", "sudo", "su -",
+]
+
+
+def _validate_path(path: str, for_write: bool = False) -> Optional[str]:
+    """Validate file path - returns error message or None if valid."""
+    if not path:
+        return "Empty path"
+    
+    # Block path traversal
+    if ".." in path:
+        return "Path traversal blocked (.. not allowed)"
+    
+    # Resolve path
+    try:
+        abs_path = os.path.abspath(path)
+    except Exception:
+        return "Invalid path"
+    
+    # Check against allowed paths
+    allowed = ALLOWED_WRITE_PATHS if for_write else ALLOWED_READ_PATHS
+    for base in allowed:
+        if abs_path.startswith(base):
+            return None
+    
+    return f"Path not in allowed directories: {allowed}"
+
+
+def _validate_command(command: str) -> Optional[str]:
+    """Validate shell command - returns error or None if safe."""
+    if not command:
+        return "Empty command"
+    
+    cmd_lower = command.lower()
+    for blocked in BLOCKED_COMMANDS:
+        if blocked in cmd_lower:
+            return f"Blocked command: {blocked}"
+    
+    # Block shell metacharacters that could chain commands
+    if "|" in command or ";" in command or "&" in command and command.count("&") > 1:
+        return "Command chaining not allowed"
+    
+    return None
+
+
+def _validate_coords(x: Any, y: Any) -> Optional[str]:
+    """Validate coordinates."""
+    try:
+        xi, yi = int(x), int(y)
+        if xi < 0 or yi < 0:
+            return "Negative coordinates not allowed"
+        if xi > 10000 or yi > 10000:
+            return "Coordinates too large (max 10000)"
+        return None
+    except (TypeError, ValueError):
+        return "Invalid coordinate format"
+
+
+def _validate_non_empty(value: str, field_name: str = "value") -> Optional[str]:
+    """Validate non-empty string."""
+    if not value or not value.strip():
+        return f"{field_name} cannot be empty"
+    return None
+
+
+# ============================================================================
+# CONFIG LOADING
+# ============================================================================
+
 def _load_config() -> dict:
     """Load configuration from file and environment variables.
 
@@ -688,6 +775,11 @@ async def handle_click(name: str, args: dict) -> str:
         action_desc = f"clicked '{matching.get('text', '')[:20]}' at ({x}, {y})"
     elif x is None or y is None:
         return json.dumps({"error": "x,y coordinates or element_text required"})
+    
+    # Validate coordinates
+    err = _validate_coords(x, y)
+    if err:
+        return json.dumps({"error": err, "ok": False})
 
     loop = asyncio.get_event_loop()
     button = args.get("button", "left")
@@ -713,6 +805,13 @@ async def handle_drag(name: str, args: dict) -> str:
     err = _require_pyautogui()
     if err:
         return json.dumps(err)
+    
+    # Validate required params
+    if "from_x" not in args or "from_y" not in args:
+        return json.dumps({"error": "from_x and from_y required", "ok": False})
+    if "to_x" not in args or "to_y" not in args:
+        return json.dumps({"error": "to_x and to_y required", "ok": False})
+    
     from_x, from_y = args["from_x"], args["from_y"]
     to_x, to_y = args["to_x"], args["to_y"]
     duration = args.get("duration", 0.5)
@@ -726,6 +825,13 @@ async def handle_scroll(name: str, args: dict) -> str:
     err = _require_pyautogui()
     if err:
         return json.dumps(err)
+    
+    # Validate required params
+    if "x" not in args or "y" not in args:
+        return json.dumps({"error": "x and y required", "ok": False})
+    if "clicks" not in args:
+        return json.dumps({"error": "clicks required", "ok": False})
+    
     x, y, clicks = args["x"], args["y"], args["clicks"]
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, lambda: pyautogui.scroll(int(clicks), x=int(x), y=int(y)))
@@ -1032,12 +1138,24 @@ async def _restart_browser():
 
 
 async def handle_browser_navigate(name: str, args: dict) -> str:
-    url = args["url"]
+    url = args.get("url", "")
+    
+    # Validate URL
+    if not url:
+        return json.dumps({"error": "url required", "ok": False})
+    
+    # Check if URL is valid format
+    if not url.startswith(("http://", "https://")):
+        return json.dumps({"error": "URL must start with http:// or https://", "ok": False})
+    
     page = await _get_browser_page()
-    await page.goto(url, wait_until="networkidle", timeout=30000)
-    title = await page.title()
-    _log_action(f"browser_navigate({url})")
-    return json.dumps({"ok": True, "url": url, "title": title})
+    try:
+        await page.goto(url, wait_until="networkidle", timeout=30000)
+        title = await page.title()
+        _log_action(f"browser_navigate({url})")
+        return json.dumps({"ok": True, "url": url, "title": title})
+    except Exception as e:
+        return json.dumps({"error": f"Navigation failed: {str(e)[:100]}", "ok": False})
 
 
 async def handle_browser_get_text(name: str, args: dict) -> str:
@@ -1112,12 +1230,15 @@ async def handle_browser_set_mode(name: str, args: dict) -> str:
 
 
 async def handle_run_command(name: str, args: dict) -> str:
-    command = args["command"]
+    command = args.get("command", "")
     cwd = args.get("cwd", str(Path.home()))
     timeout = args.get("timeout", 30)
-    dangerous = ["rm -rf /", "mkfs", "dd if=/dev", ":(){:|:&};:", "chmod 777 /"]
-    if any(d in command.lower() for d in dangerous):
-        return json.dumps({"error": "Blocked dangerous command", "ok": False})
+    
+    # Validate command
+    err = _validate_command(command)
+    if err:
+        return json.dumps({"error": err, "ok": False})
+    
     loop = asyncio.get_event_loop()
     try:
         result = await loop.run_in_executor(None, lambda: subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout, cwd=cwd))
@@ -1130,7 +1251,13 @@ async def handle_run_command(name: str, args: dict) -> str:
 
 
 async def handle_read_file(name: str, args: dict) -> str:
-    path = Path(args["path"]).expanduser()
+    path = args.get("path", "")
+    # Validate path
+    err = _validate_path(path, for_write=False)
+    if err:
+        return json.dumps({"error": err, "ok": False})
+    
+    path = Path(path).expanduser()
     max_chars = args.get("max_chars", 10000)
     try:
         content = path.read_text(errors="replace")[:max_chars]
@@ -1141,8 +1268,15 @@ async def handle_read_file(name: str, args: dict) -> str:
 
 
 async def handle_write_file(name: str, args: dict) -> str:
-    path = Path(args["path"]).expanduser()
-    content = args["content"]
+    path = args.get("path", "")
+    content = args.get("content", "")
+    
+    # Validate path
+    err = _validate_path(path, for_write=True)
+    if err:
+        return json.dumps({"error": err, "ok": False})
+    
+    path = Path(path).expanduser()
     append = args.get("append", False)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
